@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>내 주식 포트폴리오</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: sans-serif;
+            background: #f5f6f8;
+            color: #222;
+        }
+        .wrap { max-width: 960px; margin: 0 auto; }
+        h1 { text-align: center; }
+
+        /* 데모 모드 안내 배너 */
+        #banner {
+            background: #fff4d6;
+            border: 1px solid #f0d98c;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        #banner.hidden { display: none; }
+
+        /* 요약 카드 4개 */
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .card .label { font-size: 13px; color: #777; margin-bottom: 6px; }
+        .card .value { font-size: 22px; font-weight: bold; }
+
+        /* 한국식 색상: 오르면 빨강, 내리면 파랑 */
+        .up { color: #d32f2f; }
+        .down { color: #1565c0; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        th, td { padding: 12px 10px; text-align: right; font-size: 14px; }
+        th { background: #eef0f3; color: #555; font-weight: 600; }
+        td:first-child, th:first-child { text-align: left; }
+        tbody tr { border-top: 1px solid #eee; }
+        .ticker { font-size: 12px; color: #888; }
+
+        button {
+            font-family: inherit;
+            font-size: 14px;
+            padding: 8px 14px;
+            border: 0;
+            border-radius: 6px;
+            background: #3b5bdb;
+            color: #fff;
+            cursor: pointer;
+        }
+        button:hover { background: #2f4bc4; }
+        .del { background: #e9ecef; color: #666; padding: 5px 10px; }
+        .del:hover { background: #dee2e6; }
+
+        /* 종목 추가 폼 */
+        form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            background: #fff;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        input {
+            font-family: inherit;
+            font-size: 14px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            flex: 1;
+            min-width: 110px;
+        }
+        .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        #updated { font-size: 13px; color: #888; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+
+    <h1>내 주식 포트폴리오 📈</h1>
+
+    <div id="banner" class="hidden"></div>
+
+    <div class="summary">
+        <div class="card"><div class="label">총 매수금액</div><div class="value" id="totalCost">-</div></div>
+        <div class="card"><div class="label">총 평가금액</div><div class="value" id="totalValue">-</div></div>
+        <div class="card"><div class="label">총 손익</div><div class="value" id="totalProfit">-</div></div>
+        <div class="card"><div class="label">수익률</div><div class="value" id="totalRate">-</div></div>
+    </div>
+
+    <div class="toolbar">
+        <span id="updated"></span>
+        <button onclick="load()">새로고침</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>종목</th>
+                <th>수량</th>
+                <th>평단가</th>
+                <th>현재가</th>
+                <th>평가금액</th>
+                <th>손익</th>
+                <th>수익률</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+    </table>
+
+    <form onsubmit="add(event)">
+        <input id="f-ticker" placeholder="티커 (005930.KS)" required>
+        <input id="f-name" placeholder="종목명" required>
+        <input id="f-quantity" type="number" placeholder="수량" required>
+        <input id="f-avgPrice" type="number" placeholder="평단가" required>
+        <input id="f-buyDate" type="date">
+        <button type="submit">추가</button>
+    </form>
+
+</div>
+
+<script>
+    // ===== 설정 =====
+    // Apps Script 배포 후 받은 URL을 여기에 붙여넣으세요.
+    // 비워두면 목업 데이터로 동작합니다 (데모 모드).
+    const API_URL = 'https://script.google.com/macros/s/AKfycbwOjSikLpHkAAwylZbwCC4xVcaTtNd33BLtTfw2Tn42fIV7V2cjgQFbB7VyZGIKRXmtvA/exec';
+    const TOKEN = 'YOUR_SECRET_TOKEN';
+
+    // 데모 모드용 가짜 데이터
+    // currentPrice는 2026-07-15 기준 실제 시세로 넣어둔 것이라 시간이 지나면 낡습니다.
+    // API_URL을 연결하면 이 값 대신 실시간 시세를 씁니다.
+    const MOCK = [
+        { ticker: '005930.KS', name: '삼성전자',   quantity: 10, avgPrice: 240000,  currentPrice: 279500 },
+        { ticker: '000660.KS', name: 'SK하이닉스', quantity: 2,  avgPrice: 2250000, currentPrice: 2082000 },
+        { ticker: '003490.KS', name: '대한항공',   quantity: 50, avgPrice: 23800,   currentPrice: 26650 },
+    ];
+
+    // 1. 데이터 불러오기
+    async function load() {
+        let holdings;
+
+        if (!API_URL) {
+            // 데모 모드: 손익 계산을 여기서 직접 함
+            holdings = MOCK.map(h => calc(h));
+            showBanner();
+        } else {
+            try {
+                const res = await fetch(`${API_URL}?token=${TOKEN}`);
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                holdings = data.holdings;
+            } catch (err) {
+                banner(`⚠️ 데이터를 불러오지 못했습니다: ${err.message}<br>Apps Script URL과 토큰을 확인해주세요.`);
+                return;
+            }
+        }
+
+        render(holdings);
+        document.getElementById('updated').textContent =
+            `마지막 업데이트: ${new Date().toLocaleTimeString('ko-KR')}`;
+    }
+
+    // 2. 손익 계산 (데모 모드에서만 사용, 실제로는 Apps Script가 계산해서 내려줌)
+    function calc(h) {
+        const value = h.currentPrice * h.quantity;
+        const cost = h.avgPrice * h.quantity;
+        return {
+            ...h,
+            value,
+            profit: value - cost,
+            profitRate: cost ? ((value - cost) / cost) * 100 : 0,
+        };
+    }
+
+    // 3. 화면에 그리기
+    function render(holdings) {
+        const totalCost = holdings.reduce((sum, h) => sum + h.avgPrice * h.quantity, 0);
+        const totalValue = holdings.reduce((sum, h) => sum + h.value, 0);
+        const totalProfit = totalValue - totalCost;
+        const totalRate = totalCost ? (totalProfit / totalCost) * 100 : 0;
+
+        document.getElementById('totalCost').textContent = won(totalCost);
+        document.getElementById('totalValue').textContent = won(totalValue);
+        setColored('totalProfit', `${totalProfit >= 0 ? '+' : ''}${won(totalProfit)}`, totalProfit);
+        setColored('totalRate', `${totalRate >= 0 ? '+' : ''}${totalRate.toFixed(2)}%`, totalRate);
+
+        document.getElementById('rows').innerHTML = holdings.map(h => `
+            <tr>
+                <td>${h.name}<br><span class="ticker">${h.ticker}</span></td>
+                <td>${h.quantity}</td>
+                <td>${won(h.avgPrice)}</td>
+                <td>${won(h.currentPrice)}</td>
+                <td>${won(h.value)}</td>
+                <td class="${h.profit >= 0 ? 'up' : 'down'}">${h.profit >= 0 ? '+' : ''}${won(h.profit)}</td>
+                <td class="${h.profit >= 0 ? 'up' : 'down'}">${h.profitRate >= 0 ? '+' : ''}${h.profitRate.toFixed(2)}%</td>
+                <td><button class="del" onclick="remove('${h.ticker}')">삭제</button></td>
+            </tr>
+        `).join('');
+    }
+
+    // 4. 종목 추가
+    async function add(e) {
+        e.preventDefault();
+        const holding = {
+            ticker: val('f-ticker'),
+            name: val('f-name'),
+            quantity: Number(val('f-quantity')),
+            avgPrice: Number(val('f-avgPrice')),
+            buyDate: val('f-buyDate'),
+        };
+
+        if (!API_URL) {
+            alert('데모 모드에서는 추가할 수 없습니다.\nApps Script URL을 먼저 설정해주세요.');
+            return;
+        }
+
+        await post({ action: 'add', ...holding });
+        e.target.reset();
+        load();
+    }
+
+    // 5. 종목 삭제
+    async function remove(ticker) {
+        if (!API_URL) {
+            alert('데모 모드에서는 삭제할 수 없습니다.');
+            return;
+        }
+        if (!confirm(`${ticker} 종목을 삭제할까요?`)) return;
+
+        await post({ action: 'delete', ticker });
+        load();
+    }
+
+    // 6. Apps Script로 POST 보내기
+    // Content-Type을 text/plain으로 보내야 CORS preflight에 걸리지 않음
+    async function post(body) {
+        const res = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ token: TOKEN, ...body }),
+        });
+        return res.json();
+    }
+
+    // ===== 유틸 =====
+    function won(n) { return Math.round(n).toLocaleString('ko-KR') + '원'; }
+    function val(id) { return document.getElementById(id).value; }
+
+    function setColored(id, text, n) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'value ' + (n >= 0 ? 'up' : 'down');
+    }
+
+    function banner(html) {
+        const el = document.getElementById('banner');
+        el.innerHTML = html;
+        el.classList.remove('hidden');
+    }
+
+    function showBanner() {
+        banner(`
+            <b>🔧 데모 모드입니다</b> — 지금 보이는 건 가짜 데이터예요.<br>
+            실제 구글시트를 연결하려면 <code>apps-script.gs</code>를 배포하고,
+            이 파일 <code>&lt;script&gt;</code> 맨 위의 <code>API_URL</code>에 URL을 넣으세요.
+        `);
+    }
+
+    load();
+</script>
+</body>
+</html>
